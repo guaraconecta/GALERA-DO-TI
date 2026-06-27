@@ -1,0 +1,75 @@
+# .github/workflows/security-checks.yml
+# Nome do workflow: como ele aparece na aba "Actions" do GitHub
+name: Security Checks
+
+# Gatilhos (quando o workflow será executado)
+on:
+  push:
+    branches:
+      # Só executa quando houver push nas branches main ou master
+      - main
+      - master
+  pull_request:
+    branches:
+      # Só executa quando houver PR para main ou master
+      - main
+      - master
+
+# Permissões mínimas necessárias para rodar este workflow
+permissions:
+  contents: read  # Apenas leitura do repositório
+
+jobs:
+  security:
+    # Nome amigável do job
+    name: Run Security Audit
+
+    # Máquina virtual que executará o job
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout do código-fonte do repositório
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      # 2. Instala o Node.js 20 e configura o cache do npm
+      #    O cache acelera os próximos runs guardando as dependências
+      - name: Setup Node.js 20 with npm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20          # Versão do Node.js
+          cache: npm                # Habilita cache automático do npm
+
+      # 3. Instala as dependências de forma limpa e reprodutível
+      #    'npm ci' usa o package-lock.json exato do projeto
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Executa o npm audit e gera um relatório em JSON
+      #    'continue-on-error: true' garante que o relatório será salvo mesmo se vulnerabilidades forem encontradas
+      #    '--audit-level=critical' limita a saída a vulnerabilidades críticas
+      - name: Run npm audit and generate JSON report
+        id: audit
+        run: npm audit --audit-level=critical --json > security-report.json
+        continue-on-error: true
+
+      # 5. Faz upload do relatório de segurança como artefato do GitHub Actions
+      #    O artefato fica disponível para download na aba "Actions > Summary > Artifacts"
+      - name: Upload security report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report       # Nome do artefato
+          path: security-report.json  # Caminho do arquivo gerado
+          if-no-files-found: warn      # Avisa se o arquivo não for encontrado
+        # Garante que o upload rode mesmo se o audit falhar
+        if: always()
+
+      # 6. Notifica caso o npm audit tenha falhado (encontrou vulnerabilidades críticas)
+      #    Esta etapa roda apenas se o passo 'audit' sair com erro
+      - name: Notify failure on critical vulnerabilities
+        if: steps.audit.outcome == 'failure'
+        run: |
+          echo "⚠️ Vulnerabilidades CRÍTICAS detectadas!"
+          echo "Revise o relatório 'security-report.json' no artefato do workflow."
+          # O comando abaixo garante que o build falhe
+          exit 1
